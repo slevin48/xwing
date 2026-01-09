@@ -1,0 +1,6 @@
+Trench run Monte Carlo summary
+Nsim = 1000
+Successes = 801
+Success rate = 0.8010
+Parameters:
+ target_x=100.0 m, port_radius=1.00 m, firing_distance=20.0 m
