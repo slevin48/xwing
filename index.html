@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>X-Wing Trench Run - Death Star</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+            background: #000;
+        }
+        canvas {
+            display: block;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #0ff;
+            font-size: 20px;
+            text-shadow: 0 0 10px #0ff;
+            pointer-events: none;
+        }
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #0ff;
+            text-align: center;
+            font-size: 16px;
+            text-shadow: 0 0 10px #0ff;
+            pointer-events: none;
+        }
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ff0;
+            font-size: 48px;
+            text-align: center;
+            text-shadow: 0 0 20px #ff0;
+            display: none;
+        }
+        #startScreen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #0ff;
+            font-size: 24px;
+            text-align: center;
+            text-shadow: 0 0 20px #0ff;
+        }
+        .button {
+            background: rgba(0, 255, 255, 0.2);
+            border: 2px solid #0ff;
+            color: #0ff;
+            padding: 15px 30px;
+            font-size: 20px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: all 0.3s;
+        }
+        .button:hover {
+            background: rgba(0, 255, 255, 0.4);
+            box-shadow: 0 0 20px #0ff;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div>Health: <span id="health">100</span></div>
+        <div>Score: <span id="score">0</span></div>
+        <div>Distance: <span id="distance">0</span>m</div>
+    </div>
+    <div id="controls">
+        Arrow Keys or A/D: Move Left/Right<br>
+        Space: Boost Speed
+    </div>
+    <div id="gameOver">
+        <div id="gameOverText">MISSION FAILED</div>
+        <button class="button" onclick="location.reload()">Try Again</button>
+    </div>
+    <div id="startScreen">
+        <h1>X-WING TRENCH RUN</h1>
+        <p>Navigate the Death Star trench and dodge incoming missiles!</p>
+        <button class="button" onclick="startGame()">START MISSION</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Game variables
+        let scene, camera, renderer;
+        let xwing, trenchFloor, trenchWalls = [];
+        let turrets = [], missiles = [];
+        let gameStarted = false;
+        let gameOver = false;
+
+        // Game state
+        let health = 100;
+        let score = 0;
+        let distance = 0;
+        let speed = 2;
+        const baseSpeed = 2;
+        const boostSpeed = 4;
+
+        // Controls
+        const keys = {};
+        const trenchWidth = 20;
+        const xwingPositionX = 0;
+        let xwingPositionY = 0;
+
+        // Initialize
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x000000, 10, 200);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 10);
+            camera.lookAt(0, 0, -10);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x000000);
+            document.body.appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(0, 10, 5);
+            scene.add(directionalLight);
+
+            const pointLight = new THREE.PointLight(0x0088ff, 1, 100);
+            pointLight.position.set(0, 0, 0);
+            scene.add(pointLight);
+
+            // Create trench
+            createTrench();
+
+            // Create X-wing
+            createXWing();
+
+            // Event listeners
+            window.addEventListener('keydown', (e) => keys[e.key] = true);
+            window.addEventListener('keyup', (e) => keys[e.key] = false);
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function createXWing() {
+            const xwingGroup = new THREE.Group();
+
+            // Main body (fuselage)
+            const bodyGeometry = new THREE.CylinderGeometry(0.3, 0.3, 2, 8);
+            const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0xcccccc });
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.rotation.z = Math.PI / 2;
+            xwingGroup.add(body);
+
+            // Cockpit
+            const cockpitGeometry = new THREE.SphereGeometry(0.4, 16, 16);
+            const cockpitMaterial = new THREE.MeshPhongMaterial({
+                color: 0x333333,
+                transparent: true,
+                opacity: 0.7
+            });
+            const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
+            cockpit.position.x = 0.5;
+            cockpit.scale.set(0.8, 0.7, 0.7);
+            xwingGroup.add(cockpit);
+
+            // Wings (4 wings in X formation)
+            const wingGeometry = new THREE.BoxGeometry(0.2, 2, 0.8);
+            const wingMaterial = new THREE.MeshPhongMaterial({ color: 0xaaaaaa });
+
+            // Top-right wing
+            const wing1 = new THREE.Mesh(wingGeometry, wingMaterial);
+            wing1.position.set(-0.2, 1.2, 0);
+            wing1.rotation.z = -0.3;
+            xwingGroup.add(wing1);
+
+            // Bottom-right wing
+            const wing2 = new THREE.Mesh(wingGeometry, wingMaterial);
+            wing2.position.set(-0.2, -1.2, 0);
+            wing2.rotation.z = 0.3;
+            xwingGroup.add(wing2);
+
+            // Top-left wing
+            const wing3 = new THREE.Mesh(wingGeometry, wingMaterial);
+            wing3.position.set(-0.2, 1.2, 0);
+            wing3.rotation.z = -0.3;
+            wing3.rotation.y = Math.PI;
+            xwingGroup.add(wing3);
+
+            // Bottom-left wing
+            const wing4 = new THREE.Mesh(wingGeometry, wingMaterial);
+            wing4.position.set(-0.2, -1.2, 0);
+            wing4.rotation.z = 0.3;
+            wing4.rotation.y = Math.PI;
+            xwingGroup.add(wing4);
+
+            // Engine glow
+            for (let i = 0; i < 4; i++) {
+                const glowGeometry = new THREE.SphereGeometry(0.15, 8, 8);
+                const glowMaterial = new THREE.MeshBasicMaterial({
+                    color: 0xff6600,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+                const angle = (i * Math.PI / 2) + Math.PI / 4;
+                glow.position.set(-1, Math.cos(angle) * 1.2, Math.sin(angle) * 1.2);
+                xwingGroup.add(glow);
+            }
+
+            xwingGroup.position.set(0, 2, 0);
+            xwingGroup.rotation.y = Math.PI;
+            scene.add(xwingGroup);
+            xwing = xwingGroup;
+        }
+
+        function createTrench() {
+            // Trench floor (moving segments)
+            const floorGeometry = new THREE.PlaneGeometry(trenchWidth, 500);
+            const floorMaterial = new THREE.MeshPhongMaterial({
+                color: 0x444444,
+                side: THREE.DoubleSide
+            });
+            trenchFloor = new THREE.Mesh(floorGeometry, floorMaterial);
+            trenchFloor.rotation.x = -Math.PI / 2;
+            trenchFloor.position.y = -2;
+            scene.add(trenchFloor);
+
+            // Add grid lines to floor
+            const gridHelper = new THREE.GridHelper(500, 50, 0x666666, 0x333333);
+            gridHelper.position.y = -1.9;
+            scene.add(gridHelper);
+
+            // Trench walls
+            const wallHeight = 15;
+            const wallGeometry = new THREE.BoxGeometry(2, wallHeight, 500);
+            const wallMaterial = new THREE.MeshPhongMaterial({ color: 0x555555 });
+
+            // Left wall
+            const leftWall = new THREE.Mesh(wallGeometry, wallMaterial);
+            leftWall.position.set(-trenchWidth/2, wallHeight/2 - 2, 0);
+            scene.add(leftWall);
+            trenchWalls.push(leftWall);
+
+            // Right wall
+            const rightWall = new THREE.Mesh(wallGeometry, wallMaterial);
+            rightWall.position.set(trenchWidth/2, wallHeight/2 - 2, 0);
+            scene.add(rightWall);
+            trenchWalls.push(rightWall);
+
+            // Add detail panels to walls
+            for (let i = -250; i < 250; i += 10) {
+                if (Math.random() > 0.5) {
+                    const panelGeometry = new THREE.BoxGeometry(1.5, 3, 2);
+                    const panelMaterial = new THREE.MeshPhongMaterial({ color: 0x666666 });
+                    const panel = new THREE.Mesh(panelGeometry, panelMaterial);
+                    panel.position.set(
+                        (Math.random() > 0.5 ? -1 : 1) * (trenchWidth/2 - 1),
+                        Math.random() * 5,
+                        i
+                    );
+                    scene.add(panel);
+                }
+            }
+        }
+
+        function createTurret(z) {
+            const turretGroup = new THREE.Group();
+
+            // Base
+            const baseGeometry = new THREE.CylinderGeometry(0.8, 1, 1, 8);
+            const turretMaterial = new THREE.MeshPhongMaterial({ color: 0x222222 });
+            const base = new THREE.Mesh(baseGeometry, turretMaterial);
+            turretGroup.add(base);
+
+            // Gun barrel
+            const barrelGeometry = new THREE.CylinderGeometry(0.2, 0.2, 1.5, 8);
+            const barrel = new THREE.Mesh(barrelGeometry, turretMaterial);
+            barrel.rotation.z = Math.PI / 2;
+            barrel.position.x = 0.75;
+            turretGroup.add(barrel);
+
+            // Targeting light
+            const lightGeometry = new THREE.SphereGeometry(0.2, 8, 8);
+            const lightMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            const light = new THREE.Mesh(lightGeometry, lightMaterial);
+            light.position.y = 0.7;
+            turretGroup.add(light);
+
+            // Position on wall
+            const side = Math.random() > 0.5 ? 1 : -1;
+            turretGroup.position.set(
+                side * (trenchWidth/2 - 1.5),
+                2,
+                z
+            );
+
+            turretGroup.userData = {
+                side: side,
+                lastShot: 0,
+                shotInterval: 2000 + Math.random() * 2000
+            };
+
+            scene.add(turretGroup);
+            turrets.push(turretGroup);
+        }
+
+        function createMissile(turret) {
+            const missileGeometry = new THREE.CylinderGeometry(0.15, 0.15, 1, 8);
+            const missileMaterial = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+            const missile = new THREE.Mesh(missileGeometry, missileMaterial);
+
+            // Add glow
+            const glowGeometry = new THREE.SphereGeometry(0.3, 8, 8);
+            const glowMaterial = new THREE.MeshBasicMaterial({
+                color: 0xff6600,
+                transparent: true,
+                opacity: 0.6
+            });
+            const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+            glow.position.y = -0.5;
+            missile.add(glow);
+
+            missile.position.copy(turret.position);
+            missile.position.x += turret.userData.side * 0.75;
+            missile.rotation.z = turret.userData.side > 0 ? -Math.PI / 2 : Math.PI / 2;
+
+            missile.userData = {
+                direction: -turret.userData.side,
+                speed: 0.15,
+                startX: missile.position.x
+            };
+
+            scene.add(missile);
+            missiles.push(missile);
+        }
+
+        function startGame() {
+            document.getElementById('startScreen').style.display = 'none';
+            gameStarted = true;
+            animate();
+        }
+
+        function updateGame() {
+            if (!gameStarted || gameOver) return;
+
+            // Update speed based on boost
+            speed = (keys[' '] || keys['Spacebar']) ? boostSpeed : baseSpeed;
+
+            // Move X-wing left/right
+            if (keys['ArrowLeft'] || keys['a'] || keys['A']) {
+                xwingPositionY -= 0.15;
+            }
+            if (keys['ArrowRight'] || keys['d'] || keys['D']) {
+                xwingPositionY += 0.15;
+            }
+
+            // Clamp X-wing position
+            xwingPositionY = Math.max(-trenchWidth/2 + 2, Math.min(trenchWidth/2 - 2, xwingPositionY));
+            xwing.position.z = xwingPositionY;
+
+            // Tilt X-wing based on movement
+            if (keys['ArrowLeft'] || keys['a'] || keys['A']) {
+                xwing.rotation.z = Math.min(xwing.rotation.z + 0.05, 0.3);
+            } else if (keys['ArrowRight'] || keys['d'] || keys['D']) {
+                xwing.rotation.z = Math.max(xwing.rotation.z - 0.05, -0.3);
+            } else {
+                xwing.rotation.z *= 0.9;
+            }
+
+            // Update distance
+            distance += speed;
+            document.getElementById('distance').textContent = Math.floor(distance);
+
+            // Move camera forward
+            camera.position.x -= speed;
+
+            // Move trench
+            trenchFloor.position.x -= speed;
+            if (trenchFloor.position.x < -250) {
+                trenchFloor.position.x += 250;
+            }
+
+            trenchWalls.forEach(wall => {
+                wall.position.x -= speed;
+                if (wall.position.x < -250) {
+                    wall.position.x += 500;
+                }
+            });
+
+            // Spawn turrets
+            if (Math.random() < 0.01 && turrets.length < 10) {
+                createTurret(camera.position.x - 80);
+            }
+
+            // Update turrets and shoot missiles
+            const currentTime = Date.now();
+            turrets.forEach((turret, index) => {
+                turret.position.x -= speed;
+
+                // Shoot missile
+                if (currentTime - turret.userData.lastShot > turret.userData.shotInterval) {
+                    if (turret.position.x > camera.position.x - 50 && turret.position.x < camera.position.x + 10) {
+                        createMissile(turret);
+                        turret.userData.lastShot = currentTime;
+                    }
+                }
+
+                // Remove off-screen turrets
+                if (turret.position.x > camera.position.x + 20) {
+                    scene.remove(turret);
+                    turrets.splice(index, 1);
+                }
+            });
+
+            // Update missiles
+            missiles.forEach((missile, index) => {
+                missile.position.z += missile.userData.direction * missile.userData.speed;
+                missile.position.x -= speed;
+
+                // Check collision with X-wing
+                const distToXwing = Math.sqrt(
+                    Math.pow(missile.position.x - xwing.position.x, 2) +
+                    Math.pow(missile.position.z - xwing.position.z, 2)
+                );
+
+                if (distToXwing < 1.5) {
+                    health -= 20;
+                    document.getElementById('health').textContent = health;
+                    scene.remove(missile);
+                    missiles.splice(index, 1);
+
+                    // Flash screen red
+                    document.body.style.background = '#300';
+                    setTimeout(() => document.body.style.background = '#000', 100);
+
+                    if (health <= 0) {
+                        endGame(false);
+                    }
+                    return;
+                }
+
+                // Remove missiles that are out of bounds or behind camera
+                if (Math.abs(missile.position.z) > trenchWidth/2 ||
+                    missile.position.x > camera.position.x + 20) {
+                    scene.remove(missile);
+                    missiles.splice(index, 1);
+                    score += 10; // Points for dodging
+                    document.getElementById('score').textContent = score;
+                }
+            });
+
+            // Add stars in background
+            if (Math.random() < 0.1) {
+                const starGeometry = new THREE.SphereGeometry(0.1, 4, 4);
+                const starMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                const star = new THREE.Mesh(starGeometry, starMaterial);
+                star.position.set(
+                    camera.position.x - 100,
+                    Math.random() * 20 - 5,
+                    Math.random() * trenchWidth - trenchWidth/2
+                );
+                scene.add(star);
+                setTimeout(() => scene.remove(star), 5000);
+            }
+        }
+
+        function endGame(success) {
+            gameOver = true;
+            const gameOverDiv = document.getElementById('gameOver');
+            const gameOverText = document.getElementById('gameOverText');
+
+            if (success) {
+                gameOverText.textContent = 'MISSION ACCOMPLISHED!';
+                gameOverText.style.color = '#0f0';
+            } else {
+                gameOverText.textContent = 'MISSION FAILED';
+                gameOverText.style.color = '#f00';
+            }
+
+            gameOverDiv.style.display = 'block';
+        }
+
+        function animate() {
+            if (!gameStarted) return;
+
+            requestAnimationFrame(animate);
+            updateGame();
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Initialize on load
+        init();
+    </script>
+</body>
+</html>
